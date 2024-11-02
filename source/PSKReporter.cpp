@@ -179,6 +179,12 @@ namespace pskreporter {
     Packet PSKReporter::getReceiverInformation() {
         Packet payload;
 
+        // Template Link ID and length (to be filled in later)
+        payload.push_back(0x99);
+        payload.push_back(0x92);
+        payload.push_back(0x00);
+        payload.push_back(0x00);
+
         payload.push_back(static_cast<Byte>(mReceiverCallsign.size()));
         for (char c : mReceiverCallsign) {
             payload.push_back(c);
@@ -198,19 +204,11 @@ namespace pskreporter {
             payload.push_back(0);
         }
 
-        Packet out;
-        packetAppend(out, 0x99);
-        packetAppend(out, 0x92);
-
-        uint16_t totalSize = static_cast<std::uint16_t>(payload.size() + 4);
-        packetAppend(out, (totalSize & 0xFF00) >> 8);
-        packetAppend(out, totalSize & 0x00FF);
-
-        for (auto v : payload) {
-            packetAppend(out, v);
-        }
+        const uint16_t totalSize = static_cast<std::uint16_t>(payload.size());
+        payload[2] = static_cast<Byte>((totalSize & 0xFF00) >> 8);
+        payload[3] = static_cast<Byte>(totalSize & 0x00FF);
                
-        return out;
+        return payload;
     }
 
 
