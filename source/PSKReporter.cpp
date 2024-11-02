@@ -203,8 +203,7 @@ namespace pskreporter {
         packetAppend(out, 0x92);
 
         uint16_t totalSize = static_cast<std::uint16_t>(payload.size() + 4);
-
-        packetAppend(out, (totalSize & 0xFF00) >> 16);
+        packetAppend(out, (totalSize & 0xFF00) >> 8);
         packetAppend(out, totalSize & 0x00FF);
 
         for (auto v : payload) {
@@ -317,7 +316,7 @@ namespace pskreporter {
         }
 
         const uint16_t totalSize = static_cast<std::uint16_t>(payload.size());
-        payload[2] = static_cast<Byte>((totalSize & 0xFF00) >> 16);
+        payload[2] = static_cast<Byte>((totalSize & 0xFF00) >> 8);
         payload[3] = static_cast<Byte>(totalSize & 0x00FF);
 
         return payload;
