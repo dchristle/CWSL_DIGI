@@ -106,8 +106,6 @@ public:
 
     void processingLoop();
 
-    Packet getSenderRecord(Report& report);
-
     void sendPacket(Packet& packet);
 
     std::size_t makePackets();
@@ -125,6 +123,8 @@ private:
     std::vector<std::uint8_t> getDescriptorReceiver();
 
     std::vector<std::uint8_t> getDescriptorSender(REPORT_TYPE reportType);
+
+    size_t processFlowSet(Packet& wholePacket, const std::vector<Report>& reports, uint16_t templateId);
 
     std::uint32_t mID; 
     std::uint32_t mSeq;
@@ -144,7 +144,7 @@ private:
     const std::int64_t MIN_SECONDS_BETWEEN_SAME_CALLSIGN_REPORTS = 181;
 
     // max number of "safe" bytes to put in a UDP payload (one report fewer)
-    static const size_t MAX_UDP_PAYLOAD_SIZE = 1342;
+    static const size_t MAX_UDP_PAYLOAD_SIZE = 1190;
 
     std::chrono::time_point<std::chrono::steady_clock> mTimeDescriptorsSent;
 

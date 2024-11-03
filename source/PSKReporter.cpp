@@ -255,71 +255,6 @@ namespace pskreporter {
         }
     }
 
-    Packet PSKReporter::getSenderRecord(Report& report) {
-
-        Packet payload;
-
-        const bool hasLocator = !report.locator.empty();
-
-        if (hasLocator) {
-            payload.push_back(0x64);
-            payload.push_back(0xAF);
-            payload.push_back(0x00);
-            payload.push_back(0x00);
-        }
-        else {
-            payload.push_back(0x62);
-            payload.push_back(0xA7);
-            payload.push_back(0x00);
-            payload.push_back(0x00);
-        }
-
-        payload.push_back(static_cast<Byte>(report.callsign.size()));
-        for (char byte : report.callsign) {
-            payload.push_back(byte);
-        }
-        payload.push_back(static_cast<Byte>((report.freq & 0xFF000000) >> 24));
-        payload.push_back(static_cast<Byte>((report.freq & 0x00FF0000) >> 16));
-        payload.push_back(static_cast<Byte>((report.freq & 0x0000FF00) >> 8));
-        payload.push_back(static_cast<Byte>((report.freq & 0x000000FF) >> 0));
-
-        // snr
-        payload.push_back(report.snr & 0xFF);
-     
-        //std::cout << report.mode << std::endl;
-
-        payload.push_back(static_cast<Byte>(report.mode.size()));
-        for (char c : report.mode) {
-            payload.push_back(c);
-        }
-
-        if (hasLocator) {
-            payload.push_back(static_cast<Byte>(report.locator.size()));
-            for (char byte : report.locator) {
-                payload.push_back(byte);
-            }
-        }
-
-        // info src - always 1
-        payload.push_back(0x01);
-
-        const std::uint32_t epochTime = static_cast<std::uint32_t>(report.epochTime);
-        payload.push_back(static_cast<Byte>((epochTime & 0xFF000000) >> 24));
-        payload.push_back(static_cast<Byte>((epochTime & 0x00FF0000) >> 16));
-        payload.push_back(static_cast<Byte>((epochTime & 0x0000FF00) >> 8));
-        payload.push_back(static_cast<Byte>((epochTime & 0x000000FF) >> 0));
-
-        while (payload.size() % 4 != 0) {
-            payload.push_back(0);
-        }
-
-        const uint16_t totalSize = static_cast<std::uint16_t>(payload.size());
-        payload[2] = static_cast<Byte>((totalSize & 0xFF00) >> 8);
-        payload[3] = static_cast<Byte>(totalSize & 0x00FF);
-
-        return payload;
-    }
-
     void PSKReporter::sendPacket(Packet& packet) {
         std::int32_t res = send(
             mSocket, // [in] SOCKET
@@ -336,13 +271,86 @@ namespace pskreporter {
         }
     }
 
+    size_t PSKReporter::processFlowSet(Packet& packet,
+                          const std::vector<Report>& reports,
+                          uint16_t templateId) {
+        if (reports.empty() ||
+          packet.size() + 54 >= MAX_UDP_PAYLOAD_SIZE) { // Space for header + >=1 flow
+            return 0;
+        }
+
+        // Add FlowSet header
+        size_t flowSetStart = packet.size();
+        packet.push_back(static_cast<Byte>((templateId & 0xFF00) >> 8));
+        packet.push_back(static_cast<Byte>(templateId & 0x00FF));
+        packet.push_back(0x00);
+        packet.push_back(0x00);
+
+        size_t processedCount = 0;
+        for (const auto& report : reports) {
+            if (packet.size() + 50 > MAX_UDP_PAYLOAD_SIZE) {
+                break;
+            }
+
+            packet.push_back(static_cast<Byte>(report.callsign.size()));
+            for (char byte : report.callsign) {
+                packet.push_back(byte);
+            }
+            packet.push_back(static_cast<Byte>((report.freq & 0xFF000000) >> 24));
+            packet.push_back(static_cast<Byte>((report.freq & 0x00FF0000) >> 16));
+            packet.push_back(static_cast<Byte>((report.freq & 0x0000FF00) >> 8));
+            packet.push_back(static_cast<Byte>((report.freq & 0x000000FF) >> 0));
+
+            // snr
+            packet.push_back(report.snr & 0xFF);
+
+            packet.push_back(static_cast<Byte>(report.mode.size()));
+            for (char c : report.mode) {
+                payload.push_back(c);
+            }
+
+            if (hasLocator) {
+                payload.push_back(static_cast<Byte>(report.locator.size()));
+                for (char byte : report.locator) {
+                    payload.push_back(byte);
+                }
+            }
+
+            // info src - always 1
+            packet.push_back(0x01);
+
+            const std::uint32_t epochTime = static_cast<std::uint32_t>(report.epochTime);
+            packet.push_back(static_cast<Byte>((epochTime & 0xFF000000) >> 24));
+            packet.push_back(static_cast<Byte>((epochTime & 0x00FF0000) >> 16));
+            packet.push_back(static_cast<Byte>((epochTime & 0x0000FF00) >> 8));
+            packet.push_back(static_cast<Byte>((epochTime & 0x000000FF) >> 0));
+
+            mSentReports.push_back(report);
+            processedCount++;
+        }
+
+        // Pad to 4-byte boundary
+        while ((packet.size() - flowSetStart) % 4 != 0) {
+            packet.push_back(0);
+        }
+
+        // Update FlowSet length
+        uint16_t totalSize = static_cast<uint16_t>(packet.size() - flowSetStart);
+        packet[flowSetStart + 2] = static_cast<Byte>((totalSize & 0xFF00) >> 8);
+        packet[flowSetStart + 3] = static_cast<Byte>(totalSize & 0x00FF);
+
+        return processedCount;
+    }
+
+
     std::size_t PSKReporter::makePackets() {
         Packet wholePacket;
 
         addHeaderToPacket(wholePacket);
 
         bool hasDescriptors = false;
-        const std::uint32_t desc_ss = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - mTimeDescriptorsSent).count());
+        const std::uint32_t desc_ss = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::steady_clock::now() - mTimeDescriptorsSent).count());
         screenPrinter->debug("PSKr descriptors last sent " + std::to_string(desc_ss) + " sec ago");
         screenPrinter->debug("PSKr successive packets with descriptors=" + std::to_string(mPacketsSentWithDescriptors));
 
@@ -353,18 +361,20 @@ namespace pskreporter {
         }
         // if we haven't sent successive packets with descriptors
         if (mPacketsSentWithDescriptors <= 3) {
-            screenPrinter->debug("<=3 PSKr successive packets with descriptors, count=" + std::to_string(mPacketsSentWithDescriptors) + " so adding descriptors");
+            screenPrinter->debug(
+              "<=3 PSKr successive packets with descriptors, count=" + std::to_string(mPacketsSentWithDescriptors) +
+              " so adding descriptors");
             addDescriptorsToPacket(wholePacket);
             hasDescriptors = true;
         }
         auto rx = getReceiverInformation();
-        for (auto p : rx) {
+        for (auto p: rx) {
             wholePacket.push_back(p);
         }
 
-        size_t count = 0;
-        while (!terminateFlag && wholePacket.size() <= MAX_UDP_PAYLOAD_SIZE && !mReports.empty()) {
-
+        // Partition reports based on locator presence
+        std::vector <Report> withLocator, withoutLocator;
+        while (!terminateFlag && !mReports.empty()) {
             auto report = mReports.dequeue();
 
             bool skip = false;
@@ -377,33 +387,26 @@ namespace pskreporter {
                     }
                 }
             }
-            if (skip) {
-                continue;
+
+            if (!skip) {
+                if (!report.locator.empty()) {
+                    withLocator.push_back(report);
+                } else {
+                    withoutLocator.push_back(report);
+                }
             }
-
-            auto senderRec = getSenderRecord(report);
-
-            for (auto b : senderRec) {
-                wholePacket.push_back(b);
-            }
-
-            mSentReports.push_back(report);
-            count++;
         }
 
-
-        // set packet size field
-        uint16_t ps = static_cast<std::uint16_t>(wholePacket.size());
-        wholePacket[2] = static_cast<Byte>((ps & 0xFF00) >> 8);
-        wholePacket[3] = static_cast<Byte>(ps & 0x00FF);
+        size_t count = 0;
+        count += processFlowSet(wholePacket, withLocator, 0x64AF);
+        count += processFlowSet(wholePacket, withoutLocator, 0x62A7);
 
         if (count) {
             if (hasDescriptors) {
                 screenPrinter->debug("PSKr created packet with descriptors");
                 mTimeDescriptorsSent = std::chrono::steady_clock::now();
                 mPacketsSentWithDescriptors++;
-            }
-            else {
+            } else {
                 screenPrinter->debug("PSKr created packet without descriptors");
             }
 
